@@ -1,104 +1,101 @@
+'use strict';
+
 // dependencies
 var async = require('async');
 var AWS = require('aws-sdk');
-var gm = require('gm')
-    .subClass({
-        imageMagick: true
-    }); // Enable ImageMagick integration.
 var util = require('util');
+var mfn = require('modify-filename');
+
+// Enable ImageMagick integration
+var gm = require('gm').subClass({
+    imageMagick: true
+});
 
 // constants
-var MAX_WIDTH = 100;
-var MAX_HEIGHT = 100;
+var SIZES = {
+    'sm': 100,
+    'md': 320,
+    'lg': 800,
+    'or': 0
+};
+var FILETYPES = ['png', 'jpg', 'gif', 'tiff'];
 
 // get reference to S3 client
 var s3 = new AWS.S3();
 
+var transform = exports.transform = function(params, data, writeFn, done) {
+    var baseKey = params.Key;
+    async.forEachOfSeries(SIZES, function sizer(maxSize, sizeKey, sizerCb) {
+        gm(data)
+            .autoOrient()
+            .size(function(err, size) {
+                if (err) return sizerCb(err);
+                if (maxSize > 0) {
+                    // Infer the scaling factor to avoid stretching the image unnaturally
+                    var scalingFactor = Math.min(
+                        maxSize / size.width,
+                        maxSize / size.height
+                    );
+                    var width = scalingFactor * size.width;
+                    var height = scalingFactor * size.height;
+                    // Transform the image buffer in memory
+                    this.resize(width, height);
+                }
+            })
+            .toBuffer(function(err, buffer) {
+                if (err) return sizerCb(err);
+
+                params.Key = (sizeKey === 'or') ? baseKey : mfn(baseKey, function(name, ext) {
+                    return name + '_' + sizeKey + ext;
+                });
+                params.Body = buffer;
+
+                // Stream the transformed image to the same S3 bucket
+                writeFn(params, sizerCb);
+            });
+    }, done);
+};
+
 exports.handler = function(event, context) {
-    // Read options from the event.
-    console.log("Reading options from event:\n", util.inspect(event, {
+    // Read options from the event
+    console.log('Reading options from event:\n', util.inspect(event, {
         depth: 5
     }));
-    var srcBucket = event.Records[0].s3.bucket.name;
-    // Object key may have spaces or unicode non-ASCII characters.
-    var srcKey =
-        decodeURIComponent(event.Records[0].s3.object.key.replace(/\+/g, " "));
-    var dstBucket = srcBucket + "resized";
-    var dstKey = "resized-" + srcKey;
 
-    // Sanity check: validate that source and destination are different buckets.
-    if (srcBucket == dstBucket) {
-        console.error("Destination bucket must not match source bucket.");
-        return;
-    }
+    // Object key may have spaces or unicode non-ASCII characters
+    var params = {
+        Bucket: event.Records[0].s3.bucket.name,
+        Key: decodeURIComponent(event.Records[0].s3.object.key.replace(/\+/g, ' '))
+    };
 
-    // Infer the image type.
-    var typeMatch = srcKey.match(/\.([^.]*)$/);
+    // Infer the image type
+    var typeMatch = params.Key.match(/\.([^.]*)$/);
     if (!typeMatch) {
-        console.error('unable to infer image type for key ' + srcKey);
-        return;
+        console.error('unable to infer image type for key ' + params.Key);
+        return context.fail();
     }
+
     var imageType = typeMatch[1];
-    if (imageType != "jpg" && imageType != "png") {
-        console.log('skipping non-image ' + srcKey);
-        return;
+    if (!imageType || FILETYPES.indexOf(imageType) < 0) {
+        console.log('skipping non-image ' + params.Key);
+        return context.done();
     }
 
-    // Download the image from S3, transform, and upload to a different S3 bucket.
-    async.waterfall([
-        function download(next) {
-            // Download the image from S3 into a buffer.
-            s3.getObject({
-                    Bucket: srcBucket,
-                    Key: srcKey
-                },
-                next);
-        },
-        function transform(response, next) {
-            gm(response.Body).size(function(err, size) {
-                // Infer the scaling factor to avoid stretching the image unnaturally.
-                var scalingFactor = Math.min(
-                    MAX_WIDTH / size.width,
-                    MAX_HEIGHT / size.height
+    s3.getObject(params, function(err, response) {
+        if (err) return context.fail(err);
+        params.ContentType = response.ContentType;
+
+        transform(params, response.Body, s3.putObject, function(err) {
+            if (err) {
+                console.error(
+                    'Unable to resize ' + params.Bucket + '/' + params.Key +
+                    ' due to an error: ' + err
                 );
-                var width = scalingFactor * size.width;
-                var height = scalingFactor * size.height;
+                return context.fail(err);
+            }
 
-                // Transform the image buffer in memory.
-                this.resize(width, height)
-                    .toBuffer(imageType, function(err, buffer) {
-                        if (err) {
-                            next(err);
-                        } else {
-                            next(null, response.ContentType, buffer);
-                        }
-                    });
-            });
-        },
-        function upload(contentType, data, next) {
-            // Stream the transformed image to a different S3 bucket.
-            s3.putObject({
-                    Bucket: dstBucket,
-                    Key: dstKey,
-                    Body: data,
-                    ContentType: contentType
-                },
-                next);
-        }
-    ], function(err) {
-        if (err) {
-            console.error(
-                'Unable to resize ' + srcBucket + '/' + srcKey +
-                ' and upload to ' + dstBucket + '/' + dstKey +
-                ' due to an error: ' + err
-            );
-        } else {
-            console.log(
-                'Successfully resized ' + srcBucket + '/' + srcKey +
-                ' and uploaded to ' + dstBucket + '/' + dstKey
-            );
-        }
-
-        context.done();
+            console.log('Successfully resized ' + params.Bucket + '/' + params.Key);
+            return context.succeed();
+        });
     });
 };
