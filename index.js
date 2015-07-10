@@ -5,6 +5,7 @@ var async = require('async');
 var AWS = require('aws-sdk');
 var util = require('util');
 var mfn = require('modify-filename');
+var bufferEqual = require('buffer-equal');
 
 // Enable ImageMagick integration
 var gm = require('gm').subClass({
@@ -26,34 +27,66 @@ var s3 = new AWS.S3();
 var transform = exports.transform = function(params, data, writeFn, done) {
     var baseKey = params.Key;
     async.forEachOfSeries(SIZES, function sizer(maxSize, sizeKey, sizerCb) {
+        params.Key = (sizeKey === 'or') ? baseKey : mfn(baseKey, function(name, ext) {
+            return name + '_' + sizeKey + ext;
+        });
+
         gm(data)
             .autoOrient()
             .size(function(err, size) {
                 if (err) return sizerCb(err);
-                if (maxSize > 0) {
-                    // Infer the scaling factor to avoid stretching the image unnaturally
-                    var scalingFactor = Math.min(
-                        maxSize / size.width,
-                        maxSize / size.height
-                    );
-                    var width = scalingFactor * size.width;
-                    var height = scalingFactor * size.height;
-                    // Transform the image buffer in memory
-                    this.resize(width, height);
-                }
-            })
-            .toBuffer(function(err, buffer) {
-                if (err) return sizerCb(err);
+                // Infer the scaling factor to avoid stretching the image unnaturally
+                var scalingFactor = maxSize > 0 ? Math.min(
+                    maxSize / size.width,
+                    maxSize / size.height
+                ) : 1;
+                var width = scalingFactor * size.width;
+                var height = scalingFactor * size.height;
+                // Transform the image buffer in memory
+                this.resize(width, height).toBuffer(function(err, buffer) {
+                    if (err || bufferEqual(data, buffer)) {
+                        return sizerCb(err);
+                    }
 
-                params.Key = (sizeKey === 'or') ? baseKey : mfn(baseKey, function(name, ext) {
-                    return name + '_' + sizeKey + ext;
+                    // Stream the transformed image to the same S3 bucket
+                    params.Body = buffer;
+                    writeFn(params, sizerCb);
                 });
-                params.Body = buffer;
-
-                // Stream the transformed image to the same S3 bucket
-                writeFn(params, sizerCb);
             });
     }, done);
+};
+
+var s3Intf = exports.s3Intf = function(params, done) {
+    var msg = '';
+
+    // Infer the image type
+    var typeMatch = params.Key.match(/\.([^.]*)$/);
+    if (!typeMatch) {
+        msg = 'unable to infer image type for key ' + params.Key;
+        return done(new Error(msg));
+    }
+
+    var alreadyDone = Object.keys(SIZES).reduce(function(r, code) {
+        return r || params.Key.indexOf('_' + code) > -1;
+    }, false);
+    if (alreadyDone) {
+        msg = 'skipping already done ' + params.Key;
+        return done(null, msg);
+    }
+
+    var imageType = typeMatch[1];
+    if (!imageType || FILETYPES.indexOf(imageType) < 0) {
+        msg = 'skipping non-image ' + params.Key;
+        return done(null, msg);
+    }
+
+    s3.getObject(params, function(err, response) {
+        if (err) return done(err);
+        params.ContentType = response.ContentType;
+        transform(params, response.Body, function(params, cb) {
+            s3.putObject(params, cb);
+        }, done);
+    });
 };
 
 exports.handler = function(event, context) {
@@ -68,34 +101,17 @@ exports.handler = function(event, context) {
         Key: decodeURIComponent(event.Records[0].s3.object.key.replace(/\+/g, ' '))
     };
 
-    // Infer the image type
-    var typeMatch = params.Key.match(/\.([^.]*)$/);
-    if (!typeMatch) {
-        console.error('unable to infer image type for key ' + params.Key);
-        return context.fail();
-    }
+    s3Intf(params, function(err, msg) {
+        if (err) {
+            console.error(
+                'Unable to resize ' + params.Bucket + '/' + params.Key +
+                ' due to an error: ' + err
+            );
+            return context.fail(err);
+        }
+        if (msg) console.log(msg);
 
-    var imageType = typeMatch[1];
-    if (!imageType || FILETYPES.indexOf(imageType) < 0) {
-        console.log('skipping non-image ' + params.Key);
-        return context.done();
-    }
-
-    s3.getObject(params, function(err, response) {
-        if (err) return context.fail(err);
-        params.ContentType = response.ContentType;
-
-        transform(params, response.Body, s3.putObject, function(err) {
-            if (err) {
-                console.error(
-                    'Unable to resize ' + params.Bucket + '/' + params.Key +
-                    ' due to an error: ' + err
-                );
-                return context.fail(err);
-            }
-
-            console.log('Successfully resized ' + params.Bucket + '/' + params.Key);
-            return context.succeed();
-        });
+        console.log('Successfully resized ' + params.Bucket + '/' + params.Key);
+        return context.succeed();
     });
 };

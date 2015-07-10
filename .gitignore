@@ -27,3 +27,5 @@ build
 node_modules
 
 .DS_Store
+config.dev.json
+config.test.json
