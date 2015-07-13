@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "async": "^1.3.0",
-    "buffer-equal": "0.0.1",
     "gm": "^1.18.1",
     "modify-filename": "^1.1.0"
   },

@@ -6,7 +6,6 @@ Triggered by upload event of new image to S3
 Utilizing [ImageMagick](https://www.npmjs.com/package/gm) for resizing and auto-orientation.
 
 ## Resizing
-
 Four copies of each image are set at various sizes. Maximum sizes below for height or width. Keeps original ratio.
 - small (`sm`) - 100px
 - medium (`md`) - 320px

@@ -13,6 +13,7 @@ AWS.config = new AWS.Config({
     secretAccessKey: nconf.get('aws_secret'),
     region: 'us-east-1'
 });
+var s3 = new AWS.S3();
 
 var handler = require('..');
 
@@ -23,11 +24,9 @@ function writer(params, done) {
 }
 
 describe('Local', function() {
-
     before(function(done) {
-        this.timeout = 5000;
-
         this.params = {
+            Bucket: '',
             Key: 'link.png'
         };
 
@@ -52,6 +51,17 @@ describe('Local', function() {
 
 
 describe('S3', function() {
+    before(function(done) {
+        this.timeout = 5000;
+        s3.deleteObject({
+            Bucket: nconf.get('aws_bucketName').replace(/_/g, '-') + '-processed',
+            Key: 'testImage.jpg'
+        }, function(err, data) {
+            // don't care if there was an error
+            done();
+        });
+    });
+
     beforeEach(function() {
         this.params = {
             Bucket: nconf.get('aws_bucketName')

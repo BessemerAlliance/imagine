@@ -5,7 +5,6 @@ var async = require('async');
 var AWS = require('aws-sdk');
 var util = require('util');
 var mfn = require('modify-filename');
-var bufferEqual = require('buffer-equal');
 
 // Enable ImageMagick integration
 var gm = require('gm').subClass({
@@ -25,9 +24,13 @@ var FILETYPES = ['png', 'jpg', 'gif', 'tiff'];
 var s3 = new AWS.S3();
 
 var transform = exports.transform = function(params, data, writeFn, done) {
-    var baseKey = params.Key;
+    // clone the params
+    var putParams = {
+        Bucket: params.Bucket.replace(/_/g, '-') + '-processed'
+    };
+
     async.forEachOfSeries(SIZES, function sizer(maxSize, sizeKey, sizerCb) {
-        params.Key = (sizeKey === 'or') ? baseKey : mfn(baseKey, function(name, ext) {
+        putParams.Key = (sizeKey === 'or') ? params.Key : mfn(params.Key, function(name, ext) {
             return name + '_' + sizeKey + ext;
         });
 
@@ -44,13 +47,11 @@ var transform = exports.transform = function(params, data, writeFn, done) {
                 var height = scalingFactor * size.height;
                 // Transform the image buffer in memory
                 this.resize(width, height).toBuffer(function(err, buffer) {
-                    if (err || bufferEqual(data, buffer)) {
-                        return sizerCb(err);
-                    }
+                    if (err) return sizerCb(err);
 
-                    // Stream the transformed image to the same S3 bucket
-                    params.Body = buffer;
-                    writeFn(params, sizerCb);
+                    // Stream the transformed image to the "-processed" S3 bucket
+                    putParams.Body = buffer;
+                    writeFn(putParams, sizerCb);
                 });
             });
     }, done);
@@ -104,14 +105,14 @@ exports.handler = function(event, context) {
     s3Intf(params, function(err, msg) {
         if (err) {
             console.error(
-                'Unable to resize ' + params.Bucket + '/' + params.Key +
+                'Unable to process ' + params.Bucket + '/' + params.Key +
                 ' due to an error: ' + err
             );
             return context.fail(err);
         }
         if (msg) console.log(msg);
 
-        console.log('Successfully resized ' + params.Bucket + '/' + params.Key);
+        console.log('Successfully processed ' + params.Bucket + '/' + params.Key);
         return context.succeed();
     });
 };
