@@ -1,7 +1,7 @@
 {
   "name": "imagine",
   "description": "Image scaling and rotation",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Bessemer Alliance",
   "bugs": {
     "url": "https://github.com/bessemeralliance/imagine/issues"
