@@ -1,6 +1,5 @@
 'use strict';
 
-
 var fs = require('fs');
 var should = require('should');
 var rimraf = require('rimraf');
@@ -51,8 +50,9 @@ describe('Local', function() {
 
 
 describe('S3', function() {
+    this.timeout(5000);
+
     before(function(done) {
-        this.timeout = 5000;
         s3.deleteObject({
             Bucket: nconf.get('aws_bucketName').replace(/_/g, '-') + '-processed',
             Key: 'testImage.jpg'

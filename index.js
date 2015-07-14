@@ -23,6 +23,11 @@ var FILETYPES = ['png', 'jpg', 'gif', 'tiff'];
 // get reference to S3 client
 var s3 = new AWS.S3();
 
+var returnErrors = true;
+exports.ignoreErrors = function() {
+    returnErrors = false;
+};
+
 var transform = exports.transform = function(params, data, writeFn, done) {
     // clone the params
     var putParams = {
@@ -37,17 +42,21 @@ var transform = exports.transform = function(params, data, writeFn, done) {
         gm(data)
             .autoOrient()
             .size(function(err, size) {
-                if (err) return sizerCb(err);
+                if (err) return sizerCb(returnErrors ? err : null);
                 // Infer the scaling factor to avoid stretching the image unnaturally
                 var scalingFactor = maxSize > 0 ? Math.min(
                     maxSize / size.width,
                     maxSize / size.height
                 ) : 1;
-                var width = scalingFactor * size.width;
-                var height = scalingFactor * size.height;
-                // Transform the image buffer in memory
-                this.resize(width, height).toBuffer(function(err, buffer) {
-                    if (err) return sizerCb(err);
+                if (scalingFactor < 1) {
+                    var width = scalingFactor * size.width;
+                    var height = scalingFactor * size.height;
+                    // Transform the image buffer in memory
+                    this.resize(width, height);
+                }
+
+                this.toBuffer(function(err, buffer) {
+                    if (err) return sizerCb(returnErrors ? err : null);
 
                     // Stream the transformed image to the "-processed" S3 bucket
                     putParams.Body = buffer;
@@ -64,7 +73,7 @@ var s3Intf = exports.s3Intf = function(params, done) {
     var typeMatch = params.Key.match(/\.([^.]*)$/);
     if (!typeMatch) {
         msg = 'unable to infer image type for key ' + params.Key;
-        return done(new Error(msg));
+        return done(returnErrors ? new Error(msg) : null, msg);
     }
 
     var alreadyDone = Object.keys(SIZES).reduce(function(r, code) {
