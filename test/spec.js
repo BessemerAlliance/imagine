@@ -26,7 +26,7 @@ describe('Local', function() {
     before(function(done) {
         this.params = {
             Bucket: '',
-            Key: 'link.png'
+            Key: 'DeadMouse.png'
         };
 
         fs.mkdir(newdir, done);

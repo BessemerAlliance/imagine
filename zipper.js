@@ -25,11 +25,11 @@ output.on('close', function() {
 
     // automatically upload zipped file to AWS Lambda
     lambda.updateFunctionCode({
-        FunctionName: 'imagine',
+        FunctionName: pkg.name,
         ZipFile: fs.readFileSync(filepath)
     }, function(err, data) {
         if (!err) {
-            console.log('New code uploaded to imagine.');
+            console.log('New code uploaded to ', pkg.name);
         } else {
             console.log('Code upload error');
             console.log(err, err.stack);
