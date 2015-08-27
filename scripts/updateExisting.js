@@ -16,8 +16,8 @@ var handler = require('..');
 handler.ignoreErrors();
 
 var myArgs = process.argv.slice(2);
-var prefix = myArgs[0];
-var saver = myArgs[1];
+var prefix = myArgs[0] || null;
+var saver = myArgs[1] || null;
 
 function run(done) {
     var tester = 0;
@@ -35,7 +35,8 @@ function run(done) {
                 saver = results.Contents[tester - 1].Key;
                 console.log('saver:', saver);
 
-                async.eachSeries(results.Contents, function(data, cb1) {
+                async.each(results.Contents, function(data, cb1) {
+                    //if (data.Size < 5 * 1024 * 1024) return cb1(); // only look at those over 5M
                     handler.s3Intf({
                         Bucket: nconf.get('aws_bucketName'),
                         Key: data.Key

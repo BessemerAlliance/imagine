@@ -5,6 +5,7 @@ var async = require('async');
 var AWS = require('aws-sdk');
 var util = require('util');
 var mfn = require('modify-filename');
+var isImage = require('is-image');
 
 // Enable ImageMagick integration
 var gm = require('gm').subClass({
@@ -18,7 +19,6 @@ var SIZES = {
     'lg': 800,
     'or': 0
 };
-var FILETYPES = ['png', 'jpg', 'gif', 'tiff'];
 
 // get reference to S3 client
 var s3 = new AWS.S3();
@@ -69,11 +69,9 @@ var transform = exports.transform = function(params, data, writeFn, done) {
 var s3Intf = exports.s3Intf = function(params, done) {
     var msg = '';
 
-    // Infer the image type
-    var typeMatch = params.Key.match(/\.([^.]*)$/);
-    if (!typeMatch) {
-        msg = 'unable to infer image type for key ' + params.Key;
-        return done(returnErrors ? new Error(msg) : null, msg);
+    if (!isImage(params.Key)) {
+        msg = 'skipping non-image file ' + params.Key;
+        return done(null, msg);
     }
 
     var alreadyDone = Object.keys(SIZES).reduce(function(r, code) {
@@ -81,12 +79,6 @@ var s3Intf = exports.s3Intf = function(params, done) {
     }, false);
     if (alreadyDone) {
         msg = 'skipping already done ' + params.Key;
-        return done(null, msg);
-    }
-
-    var imageType = typeMatch[1];
-    if (!imageType || FILETYPES.indexOf(imageType) < 0) {
-        msg = 'skipping non-image ' + params.Key;
         return done(null, msg);
     }
 

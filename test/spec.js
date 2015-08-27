@@ -25,21 +25,43 @@ function writer(params, done) {
 describe('Local', function() {
     before(function(done) {
         this.params = {
-            Bucket: '',
-            Key: 'DeadMouse.png'
+            Bucket: ''
         };
 
         fs.mkdir(newdir, done);
     });
 
-    it('should create 4 sizes of the same image', function(done) {
-        var data = __dirname + '/' + this.params.Key;
-        handler.transform(this.params, data, writer, function(err) {
-            should.exist(fs.existsSync(newdir + 'link_sm.png'));
-            should.exist(fs.existsSync(newdir + 'link_md.png'));
-            should.exist(fs.existsSync(newdir + 'link_lg.png'));
-            should.exist(fs.existsSync(newdir + 'link.png'));
-            done(err);
+    describe('Invalid image', function() {
+        it('should only try to process images (based on extension)', function(done) {
+            this.params.Key = 'spec.js';
+            handler.s3Intf(this.params, function(err, msg) {
+                msg.should.eql('skipping non-image file spec.js');
+                done(err);
+            });
+        });
+        it('should skip processing if no file extension', function(done) {
+            this.params.Key = 'no_ext';
+            handler.s3Intf(this.params, function(err, msg) {
+                msg.should.eql('skipping non-image file no_ext');
+                done(err);
+            });
+        });
+    });
+
+    describe('Valid image', function() {
+        before(function() {
+            this.params.Key = 'DeadMouse.png';
+        });
+
+        it('should create 4 sizes of the same image', function(done) {
+            var data = __dirname + '/' + this.params.Key;
+            handler.transform(this.params, data, writer, function(err) {
+                should.exist(fs.existsSync(newdir + 'link_sm.png'));
+                should.exist(fs.existsSync(newdir + 'link_md.png'));
+                should.exist(fs.existsSync(newdir + 'link_lg.png'));
+                should.exist(fs.existsSync(newdir + 'link.png'));
+                done(err);
+            });
         });
     });
 
